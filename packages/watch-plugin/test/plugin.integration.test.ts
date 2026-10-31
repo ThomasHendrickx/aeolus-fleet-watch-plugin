@@ -45,7 +45,7 @@ beforeEach(async () => {
   secret = secretOf(commissioned.secret);
   fleet = createApp({ databaseUrl: fleetDatabaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: RECEIVE_WAIT_MS });
   fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
-  cookie = await signIn(fleetUrl);
+  cookie = await signIn(fleetUrl, unwrap(await useCases.issueSignInLink({ fleetId: argo.fleetId })).ticket);
   pluginDatabaseUrl = await createPluginDatabase();
 });
 
