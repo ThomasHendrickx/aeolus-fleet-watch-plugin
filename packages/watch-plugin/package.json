@@ -1,0 +1,66 @@
+{
+  "name": "@aeolus-fleet/watch-plugin",
+  "version": "0.0.0",
+  "description": "Watches an Aeolus fleet, raises alerts and tells the owner.",
+  "keywords": [
+    "aeolus",
+    "ai-agents"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasHendrickx/aeolus-fleet-watch-plugin.git",
+    "directory": "packages/watch-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasHendrickx/aeolus-fleet/issues"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "exports": {
+    ".": {
+      "@aeolus-fleet/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "@aeolus-fleet/source": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "bin": {
+    "aeolus-watch-plugin": "dist/bin/aeolus-watch-plugin.js"
+  },
+  "files": [
+    "dist",
+    "prisma.config.ts",
+    "src/adapters/prisma/schema.prisma",
+    "src/adapters/prisma/migrations"
+  ],
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --project tsconfig.json",
+    "dev": "tsx watch --conditions=@aeolus-fleet/source --env-file-if-exists=.env src/bin/aeolus-watch-plugin.ts start",
+    "start": "node dist/bin/aeolus-watch-plugin.js start",
+    "db:migrate": "tsx --conditions=@aeolus-fleet/source --env-file-if-exists=.env src/bin/aeolus-watch-plugin.ts migrate",
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm LICENSE"
+  },
+  "dependencies": {
+    "@aeolus-fleet/common": "^0.35.0",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "@trpc/server": "^11.19.0",
+    "fastify": "^5.12.5",
+    "prisma": "^7.10.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@aeolus-fleet/core": "^0.35.0",
+    "@testcontainers/postgresql": "^12.2.0"
+  }
+}
