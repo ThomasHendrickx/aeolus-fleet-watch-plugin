@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FLEET_ID, OTHER_FLEET_ID, SHIP_ID, memoryConnectionStore } from '../../../test/support/connection-fakes.js';
 import type { ConnectionStore } from '../../core/connection/ports.js';
-import { ok } from '../../core/shared/result.js';
+import { err, ok } from '../../core/shared/result.js';
 import { watchFleets, type FleetCallOnce } from './fleet-watch.js';
 import { createShipWakeups } from './ship-wakeups.js';
+import { refuse } from '../../core/shared/errors.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 beforeEach(() => vi.useFakeTimers());
@@ -243,6 +244,99 @@ describe('receiving for each served fleet', () => {
     const scan = running.watch.rescan();
     const stopped = running.watch.stop();
     snapshot.resolve(await connections.connected());
+    await Promise.all([scan, stopped]);
+
+    expect(running.streams).toHaveLength(1);
+  });
+});
+
+
+describe('fleet receive cancellation and retry boundaries', () => {
+  it('a late NOT_CONNECTED answer cannot stop the replacement stream', async () => {
+    const held = Promise.withResolvers<undefined>();
+    const running = await aWatch({ once: async () => { await held.promise; return refuse('NOT_CONNECTED', 'old lease ended'); } });
+    running.wake();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await running.connections.save({ fleetId: FLEET_ID, shipId: SHIP_ID, name: 'watch', crewToken: 'replacement', crewedAt: new Date('2026-11-15') });
+    await running.watch.rescan();
+    held.resolve(undefined);
+    await flush();
+
+    expect(running.streams[1]?.signal?.aborted).toBe(false);
+  });
+
+  it('a NOT_CONNECTED receive stops its stream', async () => {
+    const running = await aWatch({ once: () => Promise.resolve(refuse('NOT_CONNECTED', 'lease ended')) });
+
+    running.wake();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(running.streams[0]?.signal?.aborted).toBe(true);
+  });
+
+  it.each(['refusal', 'network error'])('a receive $0 retries after the existing pause', async (reason) => {
+    let attempts = 0;
+    const running = await aWatch({ once: () => {
+      attempts += 1;
+      if (attempts > 1) { return Promise.resolve(ok({ acknowledged: 0 })); }
+      return reason === 'refusal' ? Promise.resolve(err({ kind: 'FLEET_UNAVAILABLE', message: 'down' })) : Promise.reject(new Error('network down'));
+    } });
+
+    running.wake();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(running.received).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(running.received).toHaveLength(2);
+  });
+
+  it('a wake after token replacement cannot receive on the old stream', async () => {
+    const running = await aWatch();
+    await running.connections.save({ fleetId: FLEET_ID, shipId: SHIP_ID, name: 'watch', crewToken: 'replacement', crewedAt: new Date('2026-11-15') });
+
+    running.wake();
+    await flush();
+
+    expect(running.received).toHaveLength(0);
+  });
+
+  it('a fleet switched off cannot receive before its next rescan', async () => {
+    const running = await aWatch();
+    running.enabled.clear();
+
+    running.wake();
+    await flush();
+
+    expect(running.received).toHaveLength(0);
+  });
+
+  it('shutdown while a receive checks the switch cannot start the receive', async () => {
+    const served = Promise.withResolvers<boolean>();
+    let isHeld = false;
+    const running = await aWatch({ isServed: () => isHeld ? served.promise : Promise.resolve(true) });
+    isHeld = true;
+    running.wake();
+    await flush();
+
+    const stopped = running.watch.stop();
+    served.resolve(true);
+    await stopped;
+
+    expect(running.received).toHaveLength(0);
+  });
+
+  it('shutdown while a rescan checks switches cannot open another stream', async () => {
+    const served = Promise.withResolvers<boolean>();
+    let isHeld = false;
+    const running = await aWatch({ isServed: () => isHeld ? served.promise : Promise.resolve(true) });
+    await running.connections.save({ fleetId: OTHER_FLEET_ID, shipId: SHIP_ID, name: 'watch', crewToken: 'other', crewedAt: new Date('2026-11-15') });
+    isHeld = true;
+    const scan = running.watch.rescan();
+    await flush();
+
+    const stopped = running.watch.stop();
+    served.resolve(true);
     await Promise.all([scan, stopped]);
 
     expect(running.streams).toHaveLength(1);
