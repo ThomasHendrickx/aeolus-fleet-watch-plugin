@@ -10,7 +10,13 @@ What lives in core: the monitoring rule in decision [0071](https://github.com/Th
 | --- | --- |
 | Core (pure) | **Signals**, **alerts**, **pass**: one pass of one fleet reads the facts and the open alerts, runs every signal, raises and tells what parted with no alert open, and clears what moved back (the next slices; the design's section 5 has the flow). **Inbox**: acknowledge every delivery to its ship, a ping with pong. **Connection**, **installation** and **operator**, as the trierarch plugin's, a delete deregistering first. **Shared**: the Clock port, typed errors, Result |
 | Ports | **FleetDoor**: the ship calls it makes as its ship (register, whoami, fleet.ship, receive, ack, pong, deregister). **ConnectionStore**, **FleetSwitches**, **InstallationRequests**, **ConsoleSessions**, **Clock** |
-| Adapters | REST to the fleet; tRPC for the web app's server (`connection`, `installation`); Prisma on its own database (`connections`, `fleet_switches`, `installation_requests`); a receive loop per fleet it serves and is connected to |
+| Adapters | REST to the fleet; tRPC for the web app's server (`connection`, `installation`); Prisma on its own database (`connections`, `fleet_switches`, `installation_requests`); one wake stream per fleet it serves and is connected to |
+
+## Receiving
+
+Each connected, served fleet has one authenticated REST stream at `GET /api/v1/ship/wakeups`, read as bytes arrive. Core 0.39.0 or later is required. An open wake, a later wake and the five minute safety timer trigger `receive`. Looks are serialized within a fleet; a wake during a look queues one more. A full page triggers another receive until a short page is returned. Fleets proceed independently. The ship acknowledges deliveries, answers pings with pong and acts on none.
+
+A wake resets the safety timer. Closed or silent streams and refused openings, including `FLEET_BUSY`, reopen after the spread backoff. A stream's `LEASE_ENDED` event or opening refusal stops it and drops its connection. Rescans stop streams for fleets switched off, disconnected or using a replacement crew token. Shutdown aborts all streams and receives and waits for active acknowledgements before closing the database. Receive and every other core call retain their existing waits.
 
 ## Configuration
 
