@@ -16,7 +16,7 @@ What lives in core: the monitoring rule in decision [0071](https://github.com/Th
 
 Each connected, served fleet has one authenticated REST stream at `GET /api/v1/ship/wakeups`, read as bytes arrive. Core 0.39.0 or later is required. An open wake, a later wake and the five minute safety timer trigger `receive`. Looks are serialized within a fleet; a wake during a look queues one more. A full page triggers another receive until a short page is returned. Fleets proceed independently. The ship acknowledges deliveries, answers pings with pong and acts on none.
 
-A wake resets the safety timer. Closed or silent streams and refused openings, including `FLEET_BUSY`, reopen after the spread backoff. A stream's `LEASE_ENDED` event or opening refusal stops it and drops its connection. Rescans stop streams for fleets switched off, disconnected or using a replacement crew token. Shutdown aborts all streams and receives and waits for active acknowledgements before closing the database. Receive and every other core call retain their existing waits.
+A wake resets the safety timer. Closed or silent streams and refused openings, including `FLEET_BUSY`, reopen after the spread backoff. A stream's `LEASE_ENDED` event or opening refusal stops it and drops its connection. Rescans stop streams for fleets switched off, disconnected or using a replacement crew token. Shutdown aborts all streams and receives and waits for active acknowledgements before closing the database. Receive waits in core for a delivery, as core's receive does, and every core call made while the fleet is busy is made again after common's `FLEET_BUSY_WAITS_MS`.
 
 ## Configuration
 

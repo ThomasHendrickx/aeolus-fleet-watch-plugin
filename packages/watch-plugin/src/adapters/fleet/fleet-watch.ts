@@ -9,12 +9,12 @@ import type { ReceiveOnce } from '../../core/inbox/receive-once.js';
 
 export type FleetCallOnce = (fleetId: FleetId, until: { signal: AbortSignal }) => ReturnType<ReceiveOnce>;
 
-/** Receive failures retain the existing retry pause and the fleet door's busy waits. */
+/** The pause before a receive is called again after it failed; a busy fleet's waits are the fleet door's own. */
 const RETRY_MS = 1_000;
 const RECEIVE_PAGE_SIZE = 10;
 
 export interface FleetWatch {
-  /** Reconciles streams with the connected fleets the watch plugin serves. */
+  /** Holds one stream per connected fleet the watch plugin serves and stops every other stream. */
   rescan(): Promise<void>;
   /** Aborts streams and receives, then waits for acknowledgements before the database closes. */
   stop(): Promise<void>;
@@ -80,7 +80,7 @@ export function watchFleets(deps: {
     return { crewToken, stop: () => { stopping.abort(); stopStream(); } };
   };
 
-  const reconcile = async (): Promise<void> => {
+  const matchStreams = async (): Promise<void> => {
     const connected = await deps.connections.connected();
     if (hasStopped()) { return; }
     const served = await Promise.all(connected.map(async (crew) => ({ crew, isServed: await deps.isServed(crew.fleetId) })));
@@ -95,8 +95,8 @@ export function watchFleets(deps: {
   };
   let scanning: Promise<void> | undefined;
   const rescan = (): Promise<void> => {
-    scanning ??= track(reconcile().catch((error: unknown) => {
-      deps.log.error({ err: error }, 'the watch plugin could not reconcile fleet streams');
+    scanning ??= track(matchStreams().catch((error: unknown) => {
+      deps.log.error({ err: error }, 'the watch plugin could not match its fleet streams to the connected fleets it serves; the next rescan tries again');
     }).finally(() => { scanning = undefined; }));
     return scanning;
   };
