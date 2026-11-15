@@ -61,6 +61,7 @@ export function watchFleets(deps: {
         if (isStopping()) { return; }
         try {
           const received = await deps.once(fleetId, { signal: stopping.signal });
+          if (isStopping()) { return; }
           if (!received.isOk) {
             if (received.error.kind === 'NOT_CONNECTED') { watched.get(fleetId)?.stop(); return; }
             deps.log.warn({ fleet: fleetId, refusal: received.error }, `the watch plugin could not go on ${deps.doing}; it tries again`);
