@@ -2,6 +2,7 @@
 import type { FleetId } from '@aeolus-fleet/common';
 import type { FastifyBaseLogger } from 'fastify';
 
+import type { DropEndedCrew } from '../../core/connection/drop-ended-crew.js';
 import type { ConnectionStore } from '../../core/connection/ports.js';
 import type { IsServed } from '../../core/installation/served.js';
 import type { ReceiveOnce } from '../../core/inbox/receive-once.js';
@@ -23,6 +24,7 @@ export function watchFleets(deps: {
   once: FleetCallOnce;
   doing: string;
   connections: ConnectionStore;
+  dropEndedCrew: DropEndedCrew;
   isServed: IsServed;
   log: FastifyBaseLogger;
   rescanMs: number;
@@ -50,9 +52,7 @@ export function watchFleets(deps: {
     const ended = async () => {
       const stream = watched.get(fleetId);
       if (stream?.crewToken === crewToken) { stream.stop(); }
-      if ((await deps.connections.find(fleetId))?.crewToken === crewToken) {
-        await deps.connections.drop(fleetId);
-      }
+      await deps.dropEndedCrew(fleetId, crewToken);
     };
     const look = async (): Promise<void> => {
       while (!isStopping()) {

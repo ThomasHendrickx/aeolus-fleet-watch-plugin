@@ -15,6 +15,7 @@ import { createPrismaFleetSwitches } from './adapters/prisma/fleet-switches.js';
 import { createPrismaInstallationRequests } from './adapters/prisma/installation-requests.js';
 import { watchPluginRouter, type WatchPluginRouter } from './adapters/trpc/router.js';
 import { createConnect } from './core/connection/connect.js';
+import { createDropEndedCrew } from './core/connection/drop-ended-crew.js';
 import { createReadConnection, type ReadConnection } from './core/connection/read-connection.js';
 import { createDeleteFleet } from './core/installation/delete-fleet.js';
 import type { InstallationMode } from './core/installation/ports.js';
@@ -146,7 +147,7 @@ export function createWatchPluginApp(options: {
     startReceiving: (rescanMs = DEFAULT_RESCAN_MS) => {
       if (receiving) { return; }
       receiving = watchFleets({
-        once: receiveOnce, doing: 'receiving', connections, isServed, log: server.log, rescanMs,
+        once: receiveOnce, doing: 'receiving', connections, dropEndedCrew: createDropEndedCrew({ connections }), isServed, log: server.log, rescanMs,
         start: (crewToken, events) => createShipWakeups({
           fleetUrl: options.fleetUrl, ...events,
           failed: (error) => { server.log.warn({ err: error }, 'the watch plugin wake stream failed'); },

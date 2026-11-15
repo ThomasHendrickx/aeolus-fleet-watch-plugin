@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FLEET_ID, OTHER_FLEET_ID, SHIP_ID, memoryConnectionStore } from '../../../test/support/connection-fakes.js';
+import { createDropEndedCrew } from '../../core/connection/drop-ended-crew.js';
 import type { ConnectionStore } from '../../core/connection/ports.js';
 import { err, ok } from '../../core/shared/result.js';
 import { watchFleets, type FleetCallOnce } from './fleet-watch.js';
@@ -26,7 +27,7 @@ async function aWatch(options: { fleets?: FleetId[]; once?: FleetCallOnce; conne
   const enabled = new Set(options.fleets ?? [FLEET_ID]);
   const server = Fastify({ logger: false });
   const watch = watchFleets({
-    connections, isServed: options.isServed ?? ((fleetId) => Promise.resolve(enabled.has(fleetId))),
+    connections, dropEndedCrew: createDropEndedCrew({ connections }), isServed: options.isServed ?? ((fleetId) => Promise.resolve(enabled.has(fleetId))),
     log: server.log, rescanMs: 5000, doing: 'receiving',
     once: async (fleetId, until) => {
       received.push({ fleetId, signal: until.signal });
