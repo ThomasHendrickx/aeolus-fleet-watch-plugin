@@ -359,3 +359,24 @@ describe('the watch ship wake stream', () => {
     expect(watch.failures).toEqual([]);
   });
 });
+
+it('a refused opening never treats its body as a wake', async () => {
+  const watch = aWatch({ answers: [new Response('event: wake\n\n', { status: 503, headers: { 'content-type': 'text/event-stream' } })] });
+
+  await flush();
+
+  expect(watch.looks()).toBe(0);
+});
+
+it('stop never reads the body of a late opening refusal', async () => {
+  const opening = Promise.withResolvers<Response>();
+  const response = Response.json({ code: 'LEASE_ENDED', message: 'ended' }, { status: 401 });
+  const read = vi.spyOn(response, 'json');
+  const watch = aWatch({ answers: [opening.promise] });
+
+  watch.stop();
+  opening.resolve(response);
+  await flush();
+
+  expect(read).not.toHaveBeenCalled();
+});

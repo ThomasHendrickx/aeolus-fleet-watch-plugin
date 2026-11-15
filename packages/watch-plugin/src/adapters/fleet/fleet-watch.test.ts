@@ -342,3 +342,22 @@ describe('fleet receive cancellation and retry boundaries', () => {
     expect(running.streams).toHaveLength(1);
   });
 });
+
+it('shutdown never reads switches after a held connection scan returns', async () => {
+  const connections = memoryConnectionStore();
+  const snapshot = Promise.withResolvers<Awaited<ReturnType<ConnectionStore['connected']>>>();
+  let isHeld = false;
+  let reads = 0;
+  const running = await aWatch({
+    connections: { ...connections, connected: () => isHeld ? snapshot.promise : connections.connected() },
+    isServed: () => { reads += 1; return Promise.resolve(true); },
+  });
+  isHeld = true;
+
+  const scan = running.watch.rescan();
+  const stopped = running.watch.stop();
+  snapshot.resolve(await connections.connected());
+  await Promise.all([scan, stopped]);
+
+  expect(reads).toBe(1);
+});

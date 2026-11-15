@@ -14,7 +14,7 @@ import { createPluginDatabase } from '../src/testing/database.js';
 // keeps the crew token in its own database and is connected
 // again after a restart.
 
-/** How long the test fleet holds a receive open: short, so the receiving process stops quickly. */
+/** The existing core receive wait, also exercised by wake-triggered empty receives. */
 const RECEIVE_WAIT_MS = 500;
 
 let fleetDatabase: PrismaClient;
@@ -27,6 +27,8 @@ let shipId: ShipId;
 let secret: string;
 let cookie: string;
 const apps: WatchPluginApp[] = [];
+let asked: string[];
+let completedReceives: number;
 
 beforeEach(async () => {
   const fleetDatabaseUrl = await createMigratedDatabase();
@@ -44,6 +46,10 @@ beforeEach(async () => {
   shipId = commissioned.shipId;
   secret = secretOf(commissioned.secret);
   fleet = createApp({ databaseUrl: fleetDatabaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: RECEIVE_WAIT_MS });
+  asked = [];
+  completedReceives = 0;
+  fleet.addHook('onRequest', (request) => { asked.push(request.url); return Promise.resolve(); });
+  fleet.addHook('onResponse', (request) => { if (request.url === '/api/v1/ship/receive') { completedReceives += 1; } return Promise.resolve(); });
   fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
   cookie = await signIn(fleetUrl, unwrap(await useCases.issueSignInLink({ fleetId: argo.fleetId })).ticket);
   pluginDatabaseUrl = await createPluginDatabase();
@@ -214,5 +220,62 @@ describe('the installation (decision 0021)', () => {
     expect((await installation(address, { procedure: 'installation.delete', body: { requestId: newKey(), fleetId } })).status).toBe(200);
 
     await expect(installation(address, { procedure: 'installation.get', body: { fleetId } }).then((response) => response.json())).resolves.toEqual({ result: { data: { enabled: false, connected: false } } });
+  });
+});
+
+
+describe('wake receiving against real core', () => {
+  it('the app holds one wake stream when receiving is started twice', async () => {
+    await connected();
+
+    apps[0]?.startReceiving();
+    apps[0]?.startReceiving();
+    await expect.poll(() => asked.filter((path) => path === '/api/v1/ship/receive').length).toBe(1);
+
+    expect(asked.filter((path) => path === '/api/v1/ship/wakeups')).toHaveLength(1);
+  });
+
+  it('the real open wake drains a backlog larger than one page', async () => {
+    await connected();
+    for (let index = 0; index < 21; index += 1) {
+      unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: `waiting ${index}`, idempotencyKey: newKey() }));
+    }
+
+    apps[0]?.startReceiving();
+
+    await expect.poll(() => fleetDatabase.delivery.count({ where: { fleetId: argo.fleetId, recipientShipId: shipId, state: 'acknowledged' } })).toBe(21);
+  });
+
+  it('after restart the open wake acknowledges a delivery stored while stopped', async () => {
+    await connected();
+    apps[0]?.startReceiving();
+    await expect.poll(() => completedReceives).toBe(1);
+    await apps.splice(0)[0]?.close();
+    const { messageId } = unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: 'stored while stopped', idempotencyKey: newKey() }));
+
+    const { app } = await started();
+    app.startReceiving();
+
+    await expect.poll(() => fleetDatabase.delivery.findFirstOrThrow({ where: { messageId } })).toMatchObject({ state: 'acknowledged' });
+  });
+
+  it('a new wake acknowledges a delivery after the open look completed', async () => {
+    await connected();
+    apps[0]?.startReceiving();
+    await expect.poll(() => completedReceives).toBe(1);
+
+    const { messageId } = unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: 'a later wake', idempotencyKey: newKey() }));
+
+    await expect.poll(() => fleetDatabase.delivery.findFirstOrThrow({ where: { messageId } })).toMatchObject({ state: 'acknowledged' });
+  });
+
+  it('an empty receive retains its core wait', async () => {
+    await connected();
+    const startedAt = Date.now();
+
+    apps[0]?.startReceiving();
+    await expect.poll(() => completedReceives).toBe(1);
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(RECEIVE_WAIT_MS);
   });
 });
