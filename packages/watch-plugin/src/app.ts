@@ -6,6 +6,7 @@ import { sha256RequestHasher } from './adapters/crypto/request-hasher.js';
 import { createFleetConsoleSessions } from './adapters/fleet/console-sessions.js';
 import { watchFleets, type FleetWatch } from './adapters/fleet/fleet-watch.js';
 import { createRestFleetDoor } from './adapters/fleet/rest-fleet-door.js';
+import { createShipWakeups } from './adapters/fleet/ship-wakeups.js';
 import { runningVersion } from './adapters/http/version.js';
 import { checkDatabase, createPrismaClient } from './adapters/prisma/client.js';
 import { createPrismaConnectionStore } from './adapters/prisma/connection-store.js';
@@ -143,7 +144,14 @@ export function createWatchPluginApp(options: {
       return restored;
     },
     startReceiving: (rescanMs = DEFAULT_RESCAN_MS) => {
-      receiving = watchFleets({ once: receiveOnce, doing: 'receiving', connections, isServed, log: server.log, rescanMs });
+      if (receiving) { return; }
+      receiving = watchFleets({
+        once: receiveOnce, doing: 'receiving', connections, isServed, log: server.log, rescanMs,
+        start: (crewToken, events) => createShipWakeups({
+          fleetUrl: options.fleetUrl, ...events,
+          failed: (error) => { server.log.warn({ err: error }, 'the watch plugin wake stream failed'); },
+        })(crewToken),
+      });
       void receiving.rescan();
     },
     close: () => server.close(),

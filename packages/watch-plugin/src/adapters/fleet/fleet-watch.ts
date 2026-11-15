@@ -1,98 +1,113 @@
-/**
- * One long-poll call after another, in every fleet the watch plugin is
- * connected to and serves: its ship receiving, each delivery acknowledged and
- * left alone, which keeps its last seen fresh so the fleet judges the plugin
- * responding while this process runs. A rescan, every interval, starts in a
- * fleet newly connected or switched on; a fleet switched off or no longer
- * connected stops after its current call.
- */
+/** One wake stream per served fleet, with independent, serialized receive turns. */
 import type { FleetId } from '@aeolus-fleet/common';
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { ConnectionStore } from '../../core/connection/ports.js';
-import type { DomainError } from '../../core/shared/errors.js';
-import type { Result } from '../../core/shared/result.js';
 import type { IsServed } from '../../core/installation/served.js';
+import type { ReceiveOnce } from '../../core/inbox/receive-once.js';
 
-/** One long-poll call in a fleet, as receiving makes it. */
-export type FleetCallOnce = (fleetId: FleetId, until: { signal: AbortSignal }) => Promise<Result<unknown, DomainError<'NOT_CONNECTED' | 'FLEET_UNAVAILABLE'>>>;
+export type FleetCallOnce = (fleetId: FleetId, until: { signal: AbortSignal }) => ReturnType<ReceiveOnce>;
 
-/** How long a fleet's watch waits before it calls again after the fleet did not answer. */
+/** Receive failures retain the existing retry pause and the fleet door's busy waits. */
 const RETRY_MS = 1_000;
+const RECEIVE_PAGE_SIZE = 10;
 
 export interface FleetWatch {
-  /** Starts in every fleet it is connected to and serves, and not watched yet. */
+  /** Reconciles streams with the connected fleets the watch plugin serves. */
   rescan(): Promise<void>;
-  /** Stops, and resolves once every call in flight is done: the database may close then. */
+  /** Aborts streams and receives, then waits for acknowledgements before the database closes. */
   stop(): Promise<void>;
 }
 
-export function watchFleets(deps: { once: FleetCallOnce; doing: string; connections: ConnectionStore; isServed: IsServed; log: FastifyBaseLogger; rescanMs: number }): FleetWatch {
-  const stopping = new AbortController();
-  const watched = new Set<FleetId>();
+export function watchFleets(deps: {
+  once: FleetCallOnce;
+  doing: string;
+  connections: ConnectionStore;
+  isServed: IsServed;
+  log: FastifyBaseLogger;
+  rescanMs: number;
+  start: (crewToken: string, events: { look: () => Promise<void>; ended: () => Promise<void> }) => () => void;
+}): FleetWatch {
+  let isStopped = false;
+  const hasStopped = () => isStopped;
+  const watched = new Map<FleetId, { crewToken: string; stop: () => void }>();
   const running = new Set<Promise<void>>();
-  const track = (work: Promise<void>): void => {
+  const track = (work: Promise<void>): Promise<void> => {
     running.add(work);
-    void work.finally(() => running.delete(work));
+    void work.then(() => running.delete(work), () => running.delete(work));
+    return work;
   };
-  const pause = (ms: number) =>
-    new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      stopping.signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        resolve();
-      });
+
+  const start = (fleetId: FleetId, crewToken: string) => {
+    const stopping = new AbortController();
+    const isStopping = () => stopping.signal.aborted;
+    const pause = () => new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); stopping.signal.removeEventListener('abort', done); resolve(); };
+      const timer = setTimeout(done, RETRY_MS);
+      stopping.signal.addEventListener('abort', done, { once: true });
+      if (isStopping()) { done(); }
     });
-
-  const isStopping = (): boolean => stopping.signal.aborted;
-
-  const watch = async (fleetId: FleetId): Promise<void> => {
-    while (!isStopping() && (await deps.isServed(fleetId))) {
-      try {
-        const called = await deps.once(fleetId, { signal: stopping.signal });
-        if (!called.isOk) {
-          if (called.error.kind === 'NOT_CONNECTED') {
-            deps.log.warn({ fleet: fleetId }, `the watch plugin is no longer connected: it stops ${deps.doing} there`);
-            break;
+    const ended = async () => {
+      const stream = watched.get(fleetId);
+      if (stream?.crewToken === crewToken) { stream.stop(); }
+      if ((await deps.connections.find(fleetId))?.crewToken === crewToken) {
+        await deps.connections.drop(fleetId);
+      }
+    };
+    const look = async (): Promise<void> => {
+      while (!isStopping()) {
+        const crew = await deps.connections.find(fleetId);
+        if (crew?.crewToken !== crewToken || !(await deps.isServed(fleetId))) { return; }
+        if (isStopping()) { return; }
+        try {
+          const received = await deps.once(fleetId, { signal: stopping.signal });
+          if (!received.isOk) {
+            if (received.error.kind === 'NOT_CONNECTED') { watched.get(fleetId)?.stop(); return; }
+            deps.log.warn({ fleet: fleetId, refusal: received.error }, `the watch plugin could not go on ${deps.doing}; it tries again`);
+            await pause();
+            continue;
           }
-          deps.log.warn({ fleet: fleetId, refusal: called.error }, `the watch plugin could not go on ${deps.doing}; it tries again`);
-          await pause(RETRY_MS);
+          if (received.value.acknowledged < RECEIVE_PAGE_SIZE) { return; }
+        } catch (error) {
+          if (isStopping()) { return; }
+          deps.log.error({ err: error, fleet: fleetId }, `the watch plugin failed ${deps.doing}; it tries again`);
+          await pause();
         }
-      } catch (error) {
-        if (isStopping()) {
-          break;
-        }
-        deps.log.error({ err: error, fleet: fleetId }, `the watch plugin failed ${deps.doing}; it tries again`);
-        await pause(RETRY_MS);
       }
-    }
-    watched.delete(fleetId);
+    };
+    const stopStream = deps.start(crewToken, { look: () => track(look()), ended: () => track(ended()) });
+    return { crewToken, stop: () => { stopping.abort(); stopStream(); } };
   };
 
-  const rescan = async (): Promise<void> => {
-    for (const crew of await deps.connections.connected()) {
-      if (isStopping() || watched.has(crew.fleetId) || !(await deps.isServed(crew.fleetId))) {
-        continue;
-      }
-      watched.add(crew.fleetId);
-      track(watch(crew.fleetId));
+  const reconcile = async (): Promise<void> => {
+    const connected = await deps.connections.connected();
+    if (hasStopped()) { return; }
+    const served = await Promise.all(connected.map(async (crew) => ({ crew, isServed: await deps.isServed(crew.fleetId) })));
+    if (hasStopped()) { return; }
+    const leases = new Map(served.filter((each) => each.isServed).map(({ crew }) => [crew.fleetId, crew.crewToken]));
+    for (const [fleetId, stream] of watched) {
+      if (leases.get(fleetId) !== stream.crewToken) { stream.stop(); watched.delete(fleetId); }
+    }
+    for (const [fleetId, crewToken] of leases) {
+      if (!watched.has(fleetId)) { watched.set(fleetId, start(fleetId, crewToken)); }
     }
   };
-
-  const rescanning = setInterval(() => {
-    track(
-      rescan().catch((error: unknown) => {
-        deps.log.error({ err: error }, `the watch plugin failed to rescan its fleets for ${deps.doing}`);
-      }),
-    );
-  }, deps.rescanMs);
-
+  let scanning: Promise<void> | undefined;
+  const rescan = (): Promise<void> => {
+    scanning ??= track(reconcile().catch((error: unknown) => {
+      deps.log.error({ err: error }, 'the watch plugin could not reconcile fleet streams');
+    }).finally(() => { scanning = undefined; }));
+    return scanning;
+  };
+  const timer = setInterval(() => { void rescan(); }, deps.rescanMs);
   return {
     rescan,
     stop: async () => {
-      clearInterval(rescanning);
-      stopping.abort();
-      await Promise.all([...running]);
+      isStopped = true;
+      clearInterval(timer);
+      for (const stream of watched.values()) { stream.stop(); }
+      watched.clear();
+      while (running.size > 0) { await Promise.allSettled([...running]); }
     },
   };
 }
