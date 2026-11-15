@@ -1,5 +1,6 @@
 import { isPingContentType, type FleetId } from '@aeolus-fleet/common';
 
+import { createDropEndedCrew } from '../connection/drop-ended-crew.js';
 import type { ConnectionStore, FleetDoor } from '../connection/ports.js';
 import { refuse, type DomainError } from '../shared/errors.js';
 import { ok, type Result } from '../shared/result.js';
@@ -14,9 +15,11 @@ const GONE = new Set(['LEASE_ENDED', 'UNAUTHORIZED']);
  * delivery, and acknowledges each one on receipt, acting on none: nothing is
  * addressed to it. A ping from argo gets pong instead
  * of ack, as on any ship (blueprint, "Ping"). Its receiving keeps its last seen
- * fresh while its process runs (decision 0072). A crew token the fleet no longer takes is dropped.
+ * fresh while its process runs (decision 0072). A crew token the fleet no longer takes is dropped while it is still the
+ * one connected.
  */
 export function createReceiveOnce(deps: { door: FleetDoor; connections: ConnectionStore }): ReceiveOnce {
+  const dropEndedCrew = createDropEndedCrew({ connections: deps.connections });
   return async (fleetId, until) => {
     const crew = await deps.connections.find(fleetId);
     if (!crew) {
@@ -28,7 +31,7 @@ export function createReceiveOnce(deps: { door: FleetDoor; connections: Connecti
     if (isStopped()) { return refuse('FLEET_UNAVAILABLE', 'The receive was stopped'); }
     if (!received.isOk) {
       if (GONE.has(received.error.code)) {
-        await deps.connections.drop(fleetId);
+        await dropEndedCrew(fleetId, crew.crewToken);
         return refuse('NOT_CONNECTED', 'The fleet no longer takes the crew token: connect the watch plugin again');
       }
       return refuse('FLEET_UNAVAILABLE', `The fleet did not let the watch plugin receive: ${received.error.message}`);
