@@ -56,6 +56,21 @@ describe("the watch plugin's ship receiving", () => {
     await expect(connections.find(FLEET_ID)).resolves.toBeUndefined();
   });
 
+  it('a late LEASE_ENDED for the old crew token keeps the connection made meanwhile', async () => {
+    const crew = await connectedCrew(fleet, connections);
+    const held = Promise.withResolvers<undefined>();
+    const receive = createReceiveOnce({ connections, door: { ...fleet.door, receive: async (...args) => { await held.promise; return fleet.door.receive(...args); } } });
+    const result = receive(FLEET_ID);
+    await Promise.resolve();
+
+    fleet.state.liveTokens.clear();
+    await connections.save({ ...crew, crewToken: 'replacement' });
+    held.resolve(undefined);
+
+    await expect(result).resolves.toMatchObject({ isOk: false, error: { kind: 'NOT_CONNECTED' } });
+    await expect(connections.find(FLEET_ID)).resolves.toMatchObject({ crewToken: 'replacement' });
+  });
+
   it('is refused while the fleet does not answer, keeping the crew token', async () => {
     await connectedCrew(fleet, connections);
     fleet.state.isAnswering = false;
