@@ -47,7 +47,7 @@ function aWatch(options: { answers?: (Response | Error | Promise<Response>)[]; l
 
 const stops: (() => void)[] = [];
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => { stops.splice(0).forEach((stop) => stop()); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { stops.splice(0).forEach((stop) => { stop(); }); vi.restoreAllMocks(); vi.useRealTimers(); });
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
 /** Keep the same stream alive while testing the independent safety deadline. */
@@ -83,7 +83,7 @@ describe('the watch ship wake stream', () => {
   });
 
   it('one more look on a wake during a look', async () => {
-    const held = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<undefined>();
     const watch = aWatch({ look: () => held.promise });
     await flush();
     watch.streams[0]?.write('event: wake\n\n');
@@ -91,14 +91,14 @@ describe('the watch ship wake stream', () => {
 
     watch.streams[0]?.write('event: wake\n\nevent: wake\n\n');
     await flush();
-    held.resolve();
+    held.resolve(undefined);
     await flush();
 
     expect(watch.looks()).toBe(2);
   });
 
   it('looks serialized while the first receive waits', async () => {
-    const held = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<undefined>();
     let active = 0;
     let maximum = 0;
     const watch = aWatch({ look: async () => { active += 1; maximum = Math.max(maximum, active); await held.promise; active -= 1; } });
@@ -106,7 +106,7 @@ describe('the watch ship wake stream', () => {
 
     watch.streams[0]?.write('event: wake\n\nevent: wake\n\n');
     await flush();
-    held.resolve();
+    held.resolve(undefined);
     await flush();
 
     expect(maximum).toBe(1);
@@ -248,14 +248,14 @@ describe('the watch ship wake stream', () => {
   });
 
   it('stop discards the extra look queued by a wake', async () => {
-    const held = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<undefined>();
     const watch = aWatch({ look: () => held.promise });
     await flush();
     watch.streams[0]?.write('event: wake\n\nevent: wake\n\n');
     await flush();
 
     watch.stop();
-    held.resolve();
+    held.resolve(undefined);
     await vi.advanceTimersByTimeAsync(600_000);
 
     expect(watch.looks()).toBe(1);

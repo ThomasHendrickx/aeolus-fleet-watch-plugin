@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { FleetDoor, FleetRefusal } from '../../core/connection/ports.js';
 import { err, ok, type Result } from '../../core/shared/result.js';
 
-const refusalSchema = z.object({ code: z.string(), message: z.string() });
+import { refusalSchema } from './refusal-schema.js';
 
 /** The fleet's code for a call it could not start: nothing was stored, so the same call may be made again. */
 const FLEET_BUSY = 'SERVICE_UNAVAILABLE';
