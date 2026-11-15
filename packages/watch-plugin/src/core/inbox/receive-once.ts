@@ -22,7 +22,10 @@ export function createReceiveOnce(deps: { door: FleetDoor; connections: Connecti
     if (!crew) {
       return refuse('NOT_CONNECTED', 'The watch plugin is not connected to this fleet');
     }
+    const isStopped = () => until?.signal.aborted === true;
+    if (isStopped()) { return refuse('FLEET_UNAVAILABLE', 'The receive was stopped'); }
     const received = await deps.door.receive(crew.crewToken, until);
+    if (isStopped()) { return refuse('FLEET_UNAVAILABLE', 'The receive was stopped'); }
     if (!received.isOk) {
       if (GONE.has(received.error.code)) {
         await deps.connections.drop(fleetId);
