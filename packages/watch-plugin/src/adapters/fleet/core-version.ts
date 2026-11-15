@@ -4,7 +4,7 @@ import { ConfigError } from '../../config.js';
 import { runningVersion } from '../http/version.js';
 
 /** The oldest core the watch plugin runs against (decision 0049, docs/compatibility.md). */
-export const MINIMUM_CORE_VERSION = '0.34.0';
+export const MINIMUM_CORE_VERSION = '0.39.0';
 
 /** Stops the start when the fleet's core is older than the watch plugin needs, or does not say its version. */
 export async function requireCoreVersion(fleetUrl: string, fetch: VersionFetch = globalThis.fetch): Promise<void> {

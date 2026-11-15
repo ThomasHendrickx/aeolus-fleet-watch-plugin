@@ -6,6 +6,7 @@ import { sha256RequestHasher } from './adapters/crypto/request-hasher.js';
 import { createFleetConsoleSessions } from './adapters/fleet/console-sessions.js';
 import { watchFleets, type FleetWatch } from './adapters/fleet/fleet-watch.js';
 import { createRestFleetDoor } from './adapters/fleet/rest-fleet-door.js';
+import { createShipWakeups } from './adapters/fleet/ship-wakeups.js';
 import { runningVersion } from './adapters/http/version.js';
 import { checkDatabase, createPrismaClient } from './adapters/prisma/client.js';
 import { createPrismaConnectionStore } from './adapters/prisma/connection-store.js';
@@ -14,6 +15,7 @@ import { createPrismaFleetSwitches } from './adapters/prisma/fleet-switches.js';
 import { createPrismaInstallationRequests } from './adapters/prisma/installation-requests.js';
 import { watchPluginRouter, type WatchPluginRouter } from './adapters/trpc/router.js';
 import { createConnect } from './core/connection/connect.js';
+import { createDropEndedCrew } from './core/connection/drop-ended-crew.js';
 import { createReadConnection, type ReadConnection } from './core/connection/read-connection.js';
 import { createDeleteFleet } from './core/installation/delete-fleet.js';
 import type { InstallationMode } from './core/installation/ports.js';
@@ -143,7 +145,14 @@ export function createWatchPluginApp(options: {
       return restored;
     },
     startReceiving: (rescanMs = DEFAULT_RESCAN_MS) => {
-      receiving = watchFleets({ once: receiveOnce, doing: 'receiving', connections, isServed, log: server.log, rescanMs });
+      if (receiving) { return; }
+      receiving = watchFleets({
+        once: receiveOnce, doing: 'receiving', connections, dropEndedCrew: createDropEndedCrew({ connections }), isServed, log: server.log, rescanMs,
+        start: (crewToken, events) => createShipWakeups({
+          fleetUrl: options.fleetUrl, ...events,
+          failed: (error) => { server.log.warn({ err: error }, 'the watch plugin wake stream failed'); },
+        })(crewToken),
+      });
       void receiving.rescan();
     },
     close: () => server.close(),

@@ -56,11 +56,79 @@ describe("the watch plugin's ship receiving", () => {
     await expect(connections.find(FLEET_ID)).resolves.toBeUndefined();
   });
 
+  it('a late LEASE_ENDED for the old crew token keeps the connection made meanwhile', async () => {
+    const crew = await connectedCrew(fleet, connections);
+    const held = Promise.withResolvers<undefined>();
+    const receive = createReceiveOnce({ connections, door: { ...fleet.door, receive: async (...args) => { await held.promise; return fleet.door.receive(...args); } } });
+    const result = receive(FLEET_ID);
+    await Promise.resolve();
+
+    fleet.state.liveTokens.clear();
+    await connections.save({ ...crew, crewToken: 'replacement' });
+    held.resolve(undefined);
+
+    await expect(result).resolves.toMatchObject({ isOk: false, error: { kind: 'NOT_CONNECTED' } });
+    await expect(connections.find(FLEET_ID)).resolves.toMatchObject({ crewToken: 'replacement' });
+  });
+
   it('is refused while the fleet does not answer, keeping the crew token', async () => {
     await connectedCrew(fleet, connections);
     fleet.state.isAnswering = false;
 
     await expect(receiveOnce(FLEET_ID)).resolves.toMatchObject({ isOk: false, error: { kind: 'FLEET_UNAVAILABLE' } });
     await expect(connections.find(FLEET_ID)).resolves.toBeDefined();
+  });
+});
+
+describe('cancelled wake receives', () => {
+  it('a cancelled connection lookup never starts a receive', async () => {
+    const crew = await connectedCrew(fleet, connections);
+    const found = Promise.withResolvers<typeof crew>();
+    let receives = 0;
+    const receive = createReceiveOnce({
+      connections: { ...connections, find: () => found.promise },
+      door: { ...fleet.door, receive: (...args) => { receives += 1; return fleet.door.receive(...args); } },
+    });
+    const stopping = new AbortController();
+
+    const result = receive(FLEET_ID, { signal: stopping.signal });
+    stopping.abort();
+    found.resolve(crew);
+    await result;
+
+    expect(receives).toBe(0);
+  });
+
+  it('a late receive refusal after shutdown keeps the replacement connection', async () => {
+    const crew = await connectedCrew(fleet, connections);
+    const held = Promise.withResolvers<undefined>();
+    const receive = createReceiveOnce({ connections, door: { ...fleet.door, receive: async (...args) => { await held.promise; return fleet.door.receive(...args); } } });
+    const stopping = new AbortController();
+    const result = receive(FLEET_ID, { signal: stopping.signal });
+    await Promise.resolve();
+
+    stopping.abort();
+    fleet.state.liveTokens.clear();
+    await connections.save({ ...crew, crewToken: 'replacement' });
+    held.resolve(undefined);
+    await result;
+
+    await expect(connections.find(FLEET_ID)).resolves.toMatchObject({ crewToken: 'replacement' });
+  });
+
+  it('a late receive page after shutdown is left unacknowledged', async () => {
+    await connectedCrew(fleet, connections);
+    fleet.state.waiting = ['dlv_01m3tbfspe96yf1rnr4ank9001'];
+    const held = Promise.withResolvers<undefined>();
+    const receive = createReceiveOnce({ connections, door: { ...fleet.door, receive: async (...args) => { const answer = await fleet.door.receive(...args); await held.promise; return answer; } } });
+    const stopping = new AbortController();
+    const result = receive(FLEET_ID, { signal: stopping.signal });
+    await Promise.resolve();
+
+    stopping.abort();
+    held.resolve(undefined);
+    await result;
+
+    expect(fleet.state.acked).toEqual([]);
   });
 });

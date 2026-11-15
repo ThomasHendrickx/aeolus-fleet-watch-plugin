@@ -53,10 +53,13 @@ describe('setVersion', () => {
   });
 
   it("keeps the range of another train's package: common and core have versions of their own", () => {
+    const before = manifest('watch-plugin');
+
     setVersion(copy, '0.28.0');
 
-    expect(manifest('watch-plugin').dependencies?.['@aeolus-fleet/common']).toBe('^0.35.0');
-    expect(manifest('watch-plugin').devDependencies?.['@aeolus-fleet/core']).toBe('^0.35.0');
+    const after = manifest('watch-plugin');
+    expect(after.dependencies?.['@aeolus-fleet/common']).toBe(before.dependencies?.['@aeolus-fleet/common']);
+    expect(after.devDependencies?.['@aeolus-fleet/core']).toBe(before.devDependencies?.['@aeolus-fleet/core']);
   });
 
   it("pins a dependency on this repository's own package to that version", () => {
