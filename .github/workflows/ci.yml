@@ -77,7 +77,13 @@ jobs:
       - run: npm ci
       # The images Testcontainers starts, from the Actions cache.
       - uses: ./.github/actions/test-images
+      # No Testcontainers reaper: core's sweeper removes the run's containers, and the step after checks it did.
       - run: npm run test:integration
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
+      - name: The run left no container and no volume behind
+        if: ${{ !cancelled() }}
+        run: node scripts/check-test-run-leftovers.ts
 
   publish-dry-run:
     name: Publish dry run
