@@ -25,6 +25,11 @@ One tRPC router at `/trpc`, called with the console's session cookie, which the 
 | --- | --- |
 | `connection.status` | Whether it serves the fleet and is connected, as which ship, and the ship it was last connected as |
 | `connection.connect` | Connects with its ship's id and secret (`fleet:manage` session). Refused while connected (CONFLICT), for a ship of another fleet or without the two scopes (BAD_REQUEST) |
+| `installation.connect` | With `x-aeolus-installation-token`: strict `{ requestId, fleetId, shipId, secret }`, returning `{ enabled: true, connected: true }`. Uses the existing connect checks; the fleet must be on before success replay. Request identity is operation, fleet and ship, excluding the secret; only successes are recorded. |
 | `installation.setEnabled`, `get`, `delete` | With `x-aeolus-installation-token`: switches a fleet on or off, reads it, forgets it (decision 0021). Delete deregisters its ship from the fleet first; while the fleet does not answer it is refused (BAD_GATEWAY) and forgets nothing, so retry it with the same request id |
 
 While it is off for the fleet, every procedure but `connection.status` answers FORBIDDEN.
+
+Installation connect follows the [shared installation envelope](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/plugin-installation-connect/README.md). No configured installation token returns NOT_FOUND; a missing or wrong token returns UNAUTHORIZED. Off returns FORBIDDEN even for a successful receipt. A request id used for another operation, fleet or ship returns REQUEST_ID_USED / CONFLICT. A refused hand-over can retry the same id with a fresh secret. ALREADY_CONNECTED remains CONFLICT; secret refusal, another fleet and missing scopes remain BAD_REQUEST.
+
+A success receipt survives restart and replays without registration. It records success, not current health: read `installation.get` for current state. If the connection was saved but the receipt write or response failed, read `get` before another hand-over; do not release an existing connection. Off/on keeps the connection. Delete deregisters before forgetting, retaining data when deregistration is unavailable. This endpoint needs no newer core call; the minimum remains 0.39.0.
