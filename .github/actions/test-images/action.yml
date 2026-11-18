@@ -3,7 +3,7 @@
 # Docker Hub does, and CI runners share IPs. On a cache miss, after the
 # image list changed or the cache expired, it pulls them once with retries and
 # caches them. Needs the repository checked out, Node set up and npm ci run, since
-# the image list is core's, from node_modules.
+# the image list is core's, from where npm installed it.
 name: Test images
 description: Loads the images Testcontainers starts from the Actions cache, pulling and caching them on a miss.
 runs:
@@ -12,16 +12,19 @@ runs:
     - id: images
       shell: bash
       run: |
+        # Core is where npm installed it, the workspace or the root: resolve it.
+        testing=$(node -p "require('node:path').dirname(require.resolve('@aeolus-fleet/core/testing/postgres-global-setup', { paths: ['packages/watch-plugin'] }))")
+        echo "testing=$testing" >> "$GITHUB_OUTPUT"
         {
           echo 'list<<EOF'
-          node node_modules/@aeolus-fleet/core/dist/testing/container-images.js
+          node "$testing/container-images.js"
           echo EOF
         } >> "$GITHUB_OUTPUT"
     - id: restore
       uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/test-images.tar
-        key: test-images-${{ hashFiles('node_modules/@aeolus-fleet/core/dist/testing/container-images.js') }}
+        key: test-images-${{ hashFiles(format('{0}/container-images.js', steps.images.outputs.testing)) }}
     - name: Load the images from the cache
       if: steps.restore.outputs.cache-hit == 'true'
       shell: bash
