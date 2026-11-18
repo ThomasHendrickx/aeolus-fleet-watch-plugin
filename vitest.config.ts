@@ -1,13 +1,16 @@
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 import { configDefaults, defineConfig, type TestProjectInlineConfiguration } from 'vitest/config';
 
 /**
  * Core's Postgres global setup, by its file: vitest loads a global setup
- * outside the test environment, where a package export does not resolve.
+ * outside the test environment, where a package export does not resolve. The
+ * package resolves core from where npm installed it, so this holds wherever
+ * that is (the workspace or the root), as the test images action does.
  */
-const postgresGlobalSetup = fileURLToPath(
-  new URL('node_modules/@aeolus-fleet/core/dist/testing/postgres-global-setup.js', import.meta.url),
+const postgresGlobalSetup = createRequire(import.meta.url).resolve(
+  '@aeolus-fleet/core/testing/postgres-global-setup',
+  { paths: ['packages/watch-plugin'] },
 );
 
 /**
