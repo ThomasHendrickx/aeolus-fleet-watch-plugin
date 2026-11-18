@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import type { Connect } from '../../core/connection/connect.js';
 import type { ReadConnection } from '../../core/connection/read-connection.js';
+import type { InstallationConnect } from '../../core/installation/installation-connect.js';
 import type { DeleteFleet } from '../../core/installation/delete-fleet.js';
 import type { InstallationMode } from '../../core/installation/ports.js';
 import type { ReadFleet } from '../../core/installation/read-fleet.js';
@@ -33,6 +34,7 @@ export interface Context {
   /** The installation token header the caller sent, if any. */
   installationTokenSent: string | undefined;
   installation: { mode: InstallationMode; token: string | undefined };
+  installationConnect: InstallationConnect;
   setFleetEnabled: SetFleetEnabled;
   readFleet: ReadFleet;
   deleteFleet: DeleteFleet;
@@ -155,6 +157,18 @@ export const watchPluginRouter = t.router({
       }),
   }),
   installation: t.router({
+    /** Hands over a commissioned ship using the installation's durable success receipt. */
+    connect: installationProcedure
+      .input(z.strictObject({ requestId: idempotencyKeySchema, fleetId: idSchema('fleet'), shipId: idSchema('ship'), secret: z.string().min(1) }))
+      .output(z.object({ enabled: z.literal(true), connected: z.literal(true) }))
+      .mutation(async ({ ctx, input }) => {
+        const connected = await ctx.installationConnect(input);
+        if (!connected.isOk) {
+          const codes = { ...CONNECT_CODES, OFF: 'FORBIDDEN', REQUEST_ID_USED: 'CONFLICT' } as const;
+          throw new TRPCError({ code: codes[connected.error.kind], message: connected.error.message });
+        }
+        return { enabled: connected.value.isEnabled, connected: connected.value.isConnected };
+      }),
     /** Switches the watch plugin on or off for a fleet; off keeps everything of it. A replayed request id answers its first answer. */
     setEnabled: installationProcedure
       .input(z.strictObject({ requestId: idempotencyKeySchema, fleetId: idSchema('fleet'), enabled: z.boolean() }))

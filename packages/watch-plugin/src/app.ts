@@ -17,6 +17,7 @@ import { watchPluginRouter, type WatchPluginRouter } from './adapters/trpc/route
 import { createConnect } from './core/connection/connect.js';
 import { createDropEndedCrew } from './core/connection/drop-ended-crew.js';
 import { createReadConnection, type ReadConnection } from './core/connection/read-connection.js';
+import { createInstallationConnect } from './core/installation/installation-connect.js';
 import { createDeleteFleet } from './core/installation/delete-fleet.js';
 import type { InstallationMode } from './core/installation/ports.js';
 import { createReadFleet } from './core/installation/read-fleet.js';
@@ -97,6 +98,7 @@ export function createWatchPluginApp(options: {
   const readFleet = createReadFleet({ isServed, connections });
   const deleteFleet = createDeleteFleet({ forgetter: createPrismaFleetForgetter(prisma), requests, hasher: sha256RequestHasher, clock, door, connections });
   const connect = createConnect({ door, store: connections, clock });
+  const installationConnect = createInstallationConnect({ requests, hasher: sha256RequestHasher, clock, isServed, connect });
   const receiveOnce = createReceiveOnce({ door, connections });
   let receiving: FleetWatch | undefined;
 
@@ -116,6 +118,7 @@ export function createWatchPluginApp(options: {
         heldConnection,
         installationTokenSent: typeof req.headers['x-aeolus-installation-token'] === 'string' ? req.headers['x-aeolus-installation-token'] : undefined,
         installation: { mode: installation, token: options.installationToken },
+        installationConnect,
         setFleetEnabled,
         readFleet,
         deleteFleet,
