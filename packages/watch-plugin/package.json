@@ -51,10 +51,10 @@
     "postpack": "rm LICENSE"
   },
   "dependencies": {
-    "@aeolus-fleet/common": "^0.35.0",
+    "@aeolus-fleet/common": "^0.39.1",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.29.5",
     "fastify": "^5.12.5",
     "prisma": "^7.10.0",
     "zod": "^4.6.5"
