@@ -1,0 +1,37 @@
+# Puts the repository's node_modules on the runner from the Actions cache, so a job
+# does not run npm ci from scratch. The key holds the runner OS and arch, the Node version and the
+# package-lock.json hash. The generated Prisma client is not cached: npm ci's postinstall
+# generates it, and a hit generates it again, so it is never stale whatever changed (the
+# schema, prisma.config.ts or the scripts that run generation). On a miss it runs npm ci as
+# always and caches node_modules. Needs the repository checked out and Node set up.
+name: Install
+description: Restores node_modules from the Actions cache, running npm ci and caching it on a miss, and generates the Prisma client every time.
+runs:
+  using: composite
+  steps:
+    - id: node
+      shell: bash
+      run: echo "version=$(node -p process.versions.node)" >> "$GITHUB_OUTPUT"
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.version }}-${{ hashFiles('package-lock.json') }}
+    - name: npm ci
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+        key: ${{ steps.restore.outputs.cache-primary-key }}
+    # npm ci generates the client in its postinstall, with the same command: on a hit it runs
+    # here, so the client always matches the checked-out schema and config.
+    - if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      run: npm run generate --workspace @aeolus-fleet/watch-plugin

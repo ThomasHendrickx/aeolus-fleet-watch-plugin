@@ -2,7 +2,7 @@
 # so a test job pulls nothing: ECR Public throttles anonymous pulls per IP, as
 # Docker Hub does, and CI runners share IPs. On a cache miss, after the
 # image list changed or the cache expired, it pulls them once with retries and
-# caches them. Needs the repository checked out, Node set up and npm ci run, since
+# caches them. Needs the repository checked out, Node set up and the install done, since
 # the image list is core's, from where npm installed it.
 name: Test images
 description: Loads the images Testcontainers starts from the Actions cache, pulling and caching them on a miss.
