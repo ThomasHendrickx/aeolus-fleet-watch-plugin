@@ -1,0 +1,34 @@
+# Puts the repository's node_modules on the runner from the Actions cache, so a job
+# does not run npm ci from scratch. The key holds the runner OS, the Node version, the
+# package-lock.json hash and the Prisma schema hash, since npm ci's postinstall generates
+# the Prisma client from that schema into src, and the cache holds that output too. On a
+# miss it runs npm ci as always and caches the result. Needs the repository checked out
+# and Node set up.
+name: Install
+description: Restores node_modules and the generated Prisma client from the Actions cache, running npm ci and caching it on a miss.
+runs:
+  using: composite
+  steps:
+    - id: node
+      shell: bash
+      run: echo "version=$(node -p process.versions.node)" >> "$GITHUB_OUTPUT"
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+          packages/watch-plugin/src/adapters/prisma/generated
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.version }}-${{ hashFiles('package-lock.json', 'packages/watch-plugin/src/adapters/prisma/schema.prisma') }}
+    - name: npm ci
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          node_modules
+          packages/*/node_modules
+          packages/watch-plugin/src/adapters/prisma/generated
+        key: ${{ steps.restore.outputs.cache-primary-key }}
